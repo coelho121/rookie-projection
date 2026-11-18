@@ -20,6 +20,9 @@
 - Step 3 in `notebooks/02_modelling.ipynb`: tuned and compared Ridge, Ridge + splines, gradient boosting and an ensemble; ablation by feature group; calibration; quantile models for floor and ceiling
 - Step 5: interpretation notebook `notebooks/03_interpretation.ipynb`; final model definitions moved to `src/models.py` (reproduces CV RMSE 1.889)
 - Tested team and role features in `notebooks/04_team_features.ipynb`; downloaded the 1999-00 season for the previous-season team rating
+- Step 6: tiers, tier probabilities, style comparables and player cards in `notebooks/05_projections.ipynb`; logic in `src/projection.py`
+- Step 7A, robustness in `notebooks/06_robustness.ipynb`: model without the age cut, and 10/15-game windows. `build_rookie_window.py` and `build_features.py` now take `--window N` (writes `*_wN.csv`); `build_features.py` also writes `model_table_all_ages.csv`
+- "Empty minutes" follow-up in `notebooks/07_empty_minutes.ipynb` (prompted by Darius Acuff Jr., 2026 class: ~36 mpg and 33% usage on a weak Kings team): tested two more features and built a warning flag for the player cards (`src/projection.py`)
 
 ## Decisions
 
@@ -84,6 +87,19 @@
 - Interpretation uses out-of-fold permutation importance (single features and whole groups shuffled together, since correlated features share importance) and partial dependence curves on a model fitted to the whole development set
 - The honest "added value" of a feature group is the ablation (retrained without it); permutation importance shows how much the fitted model leans on it
 - Team and role features (team net rating in the window and the previous season, minutes × team quality, +/- relative to the team, rotation rank, position) were tested as a group, with the rule set before testing: kept only if they beat the current model on the same 25 splits. **Rejected**: they stay in `model_table.csv` (documented) but not in the model
+- Tiers on VORP 3+4: Little or no value < 0.5, Bench 0.5-2, Rotation 2-4, Starter 4-6, All-Star level ≥ 6. The All-Star cut is 6, not 8, because the 4-8 range held Kyrie, Westbrook, Dwight and Horford in All-Star years
+- Tier probabilities use an adaptive kernel on out-of-fold predictions: Gaussian weights (bandwidth 0.5 VORP) plus the 50 closest players always counting in full, leave-one-out; chosen by Brier score among k-NN, plain kernel and adaptive kernel
+  - k-NN gave every top prospect the same neighbours (Lillard = Rose); a plain kernel left top prospects resting on 2-3 players (Carter-Williams 66% All-Star from LeBron and CP3); widening the kernel instead of adding the closest players dragged the most extreme prediction (Rose) into the crowded middle
+- Each player card reports the effective number of players behind its percentages
+- Style comparables: k-NN (k = 5) on the standardised window profile (position, age, mpg, usage, pts, ast, ORB%, DRB%, blk, stl, 3PA rate, FTA rate, TS%)
+- Robustness checks run on the development set before the final test, with the model unchanged (same ensemble and settings), so any change they suggested could still be made honestly. The final test freezes the model
+- Shorter windows reuse the same shrinkage settings, so short windows are automatically pulled harder toward the average rookie
+- The 25-game window stays the main analysis (it is the project's question); shorter windows only measure how early the signal appears
+- "Empty volume" candidates, with rules fixed before running: kept only if mean RMSE drops and they beat the current model in ≥ 15/25 splits
+  - `young_minutes_share`: share of the team's window minutes played by other 1st/2nd-year players (team in "development mode"); experience from the first logged season, with the draft year for players already in the league in 1999-00
+  - `ts_add36`: points per 36 above a league-average shooter on the same shots (shrunk relative TS% × shot volume), so "empty volume" is strongly negative
+  - **Rejected**: both stay in the data, not in the model
+- Warning flag on player cards instead of a model change: profile "heavy minutes, weak team" = ≥ 28 mpg (starter minutes) with window net rating ≤ -5 (about the weakest quarter), thresholds fixed before looking at the errors. The card reports the historical average error for the profile with a bootstrap 90% range and the number of players. The model supports the decision; the analyst adds the context the model can't learn
 - EDA uses the classes drafted 2000-2016 only, so no decision is informed by the test set (it was done before the walk-forward scheme; classes 2014-2016 only shaped general impressions such as the U-shaped relations)
 
 ## Problems
@@ -141,3 +157,14 @@
 - Team features don't help: ensemble + team RMSE 1.899 vs 1.889 (better in only 10/25 splits); Ridge + team 1.903 vs 1.904 (14/25). Added one at a time, none beats noise (best: position −0.002)
 - Over-prediction on bad teams is not systematic: by team-quality quintile the errors go −0.22, +0.22, −0.03, −0.08, +0.09, with no trend. The "empty minutes" busts are individual cases, not a learnable pattern
 - Team information is largely already in the model: rotation rank overlaps with minutes per game, and team quality with the pick (bad teams pick first)
+- Tier shares (dev set): 60% little or no value, 18% bench, 12% rotation, 5% starter, 5% All-Star level
+- Tier probabilities beat pick-only: Brier 0.532 vs 0.570 (no information: 0.592), and they are reliable (predicted ≈ observed for P(starter or better))
+- Ranking by the model's P(All-Star) finds 17 of the 35 All-Star-level players in the top 50, vs 15 by draft pick
+- At the very top the data can't separate LeBron, Rose and CP3 (all ~36% All-Star): too few historical players were predicted that high
+- Pick-only reliability shows a CV artefact: with few #1-#2 picks per fold, busts get the highest out-of-fold pick-only probabilities (holding out a class shifts the pick curve against its own players)
+- Cards: Lillard 34% All-Star (became All-Star), Marc Gasol 17% All-Star / 18% starter (became starter), Bennett 4% All-Star (bust); misses: Draymond 3% (looked ordinary early), Carter-Williams 38% (empty minutes)
+- The age cut doesn't change the result: without it (691 vs 683 players) the gain over the baseline is 10.3% vs 10.1%, Spearman 0.44 in both, 24/25 splits. Only 8 older debutants are in the development set (Splitter, Scola, Navarro...), all with VORP ≤ 2.9; the cut stays for the conceptual reason (formed players, years 3-4 at 30+), not because it moves the numbers
+- The signal builds game by game: RMSE gain over the baseline is 3.9% after 10 games (19/25 splits), 7.2% after 15 (21/25) and 10.1% after 25 (24/25); Spearman 0.37 → 0.40 → 0.44. 10 games already hold ~40% of the 25-game gain and 15 games ~70%, and the curve hasn't flattened at 25, so longer windows would likely add more
+- Neither empty-volume feature helps: `young_minutes_share` and `ts_add36` each beat the current model in only 9/25 splits (both together 11/25) and nudge RMSE up (+0.001 to +0.003)
+- The empty-minutes pattern is real but small and noisy: for heavy-minutes rookies on weak teams the model was too optimistic by 0.7 VORP on average (90% range -1.7 to +0.3, 27 players); for heavy-minutes rookies on other teams it was too cautious by 1.1 (range about 0 to +2.3, 32 players). Early minutes are worth more on a decent team than on a bad one, but ~60 cases are too few for the model to learn it
+- The flagged group mixes busts (Carter-Williams, Jonny Flynn, Jay Williams, Dajuan Wagner) and stars (Durant, Anthony Davis, Westbrook, Blake Griffin): heavy minutes on a bad team are a yellow light, not a verdict

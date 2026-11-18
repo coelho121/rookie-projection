@@ -104,6 +104,49 @@ def brier_score(probs: pd.DataFrame, actual) -> float:
     return float((diff ** 2).sum(axis=1).mean())
 
 
+# "Empty minutes" warning (notebooks/07_empty_minutes.ipynb). Thresholds were
+# fixed before looking at the errors: starter minutes, weakest ~quarter of teams.
+HEAVY_MPG = 28
+WEAK_TEAM_NET = -5
+PROFILES = ["Heavy minutes, weak team", "Heavy minutes, other team"]
+
+
+def minutes_profile(df: pd.DataFrame) -> pd.Series:
+    """Which minutes profile each player has ('' if none)."""
+    heavy = df["mpg"] >= HEAVY_MPG
+    weak = df["team_net_window"] <= WEAK_TEAM_NET
+    return pd.Series(np.select([heavy & weak, heavy], PROFILES, default=""),
+                     index=df.index)
+
+
+def profile_history(ref: pd.DataFrame, ref_preds: pd.Series, target: str = "target_vorp",
+                    n_boot: int = 5000, seed: int = 0) -> pd.DataFrame:
+    """How far off the model was, historically, for each minutes profile.
+
+    Average error (actual - out-of-fold prediction) with a bootstrap 90% range.
+    """
+    rng = np.random.default_rng(seed)
+    profile = minutes_profile(ref)
+    rows = {}
+    for name in PROFILES:
+        err = (ref[target] - ref_preds)[profile == name].to_numpy()
+        boot = rng.choice(err, size=(n_boot, len(err)), replace=True).mean(axis=1)
+        rows[name] = {"players": len(err), "avg_error": err.mean(),
+                      "low": np.percentile(boot, 5), "high": np.percentile(boot, 95)}
+    return pd.DataFrame(rows).T
+
+
+def profile_warning(profile: str, history: pd.DataFrame) -> str:
+    """One line of context for a player card ('' when no profile applies)."""
+    if not profile:
+        return ""
+    h = history.loc[profile]
+    direction = "too optimistic" if h["avg_error"] < 0 else "too cautious"
+    return (f"Warning - {profile.lower()}: historically the model was {direction} "
+            f"for this profile by {abs(h['avg_error']):.1f} VORP on average "
+            f"(90% range {h['low']:+.1f} to {h['high']:+.1f}, {int(h['players'])} players)")
+
+
 def style_comps(players: pd.DataFrame, ref: pd.DataFrame, k: int = 5,
                 features=STYLE_FEATURES) -> pd.DataFrame:
     """The k reference players with the most similar window profile.

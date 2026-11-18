@@ -32,9 +32,13 @@ N_FOLDS = 5
 SEGMENTS = ["Picks 1-10", "Picks 11-30", "2nd round"]
 
 
-def load_table() -> pd.DataFrame:
-    """Model table plus helper columns used by the evaluation rules."""
-    df = pd.read_csv(MODEL_TABLE)
+def load_table(name: str = "model_table") -> pd.DataFrame:
+    """Model table plus helper columns used by the evaluation rules.
+
+    name: 'model_table' (main), or a robustness variant such as
+          'model_table_all_ages' or 'model_table_w10'.
+    """
+    df = pd.read_csv(MODEL_TABLE.parent / f"{name}.csv")
     # End year of the player's year-4 season: when his target became known
     df["target_known_year"] = df["debut_season"].str[:4].astype(int) + 4
     df["segment"] = np.select(

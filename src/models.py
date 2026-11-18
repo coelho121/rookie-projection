@@ -26,6 +26,9 @@ GROUPS = {"Pick": PICK, "Context": CONTEXT, "Opportunity": OPPORTUNITY,
 TEAM = ["team_net_prev", "team_net_window", "mpg_x_team_net", "rel_pm36",
         "rotation_rank", "position"]
 
+# "Empty volume" candidates (notebooks/07_empty_minutes.ipynb)
+EMPTY_VOLUME = ["young_minutes_share", "ts_add36"]
+
 # Tuned settings (notebooks/02_modelling.ipynb)
 RIDGE_ALPHA = 30
 SPLINE_ALPHA = 300

@@ -15,9 +15,12 @@ Outputs:
                                             totals (needed for usage, rebound %)
 
 Run from the project root:
-    python src/build_rookie_window.py
+    python src/build_rookie_window.py              # the main 25-game window
+    python src/build_rookie_window.py --window 10  # robustness check: shorter
+                                                   # windows write *_w10.csv
 """
 
+import argparse
 from pathlib import Path
 
 import pandas as pd
@@ -27,6 +30,11 @@ RAW_DIR = ROOT / "data" / "raw" / "gamelogs"
 PROC_DIR = ROOT / "data" / "processed"
 
 WINDOW = 25  # team games, counted from the player's debut
+
+
+def window_suffix(window: int) -> str:
+    """File suffix for a window length: '' for the main 25 games, '_w10' etc."""
+    return "" if window == WINDOW else f"_w{window}"
 
 # Box-score columns kept for the player, his team and the opponent
 STATS = [
@@ -77,7 +85,8 @@ def find_debuts(draft: pd.DataFrame, player_logs: pd.DataFrame) -> pd.DataFrame:
        "debut_team_id", "debut_team"]]
 
 
-def add_window_end(debuts: pd.DataFrame, team_logs: pd.DataFrame) -> pd.DataFrame:
+def add_window_end(debuts: pd.DataFrame, team_logs: pd.DataFrame,
+                   window_games: int = WINDOW) -> pd.DataFrame:
     """For each debut, find the date of the last team game in the window."""
     schedules = {
         key: g.sort_values("GAME_DATE")
@@ -86,7 +95,7 @@ def add_window_end(debuts: pd.DataFrame, team_logs: pd.DataFrame) -> pd.DataFram
     ends, lengths = [], []
     for row in debuts.itertuples():
         sched = schedules[(row.debut_season, row.debut_team_id)]
-        window = sched[sched["GAME_DATE"] >= row.debut_date].head(WINDOW)
+        window = sched[sched["GAME_DATE"] >= row.debut_date].head(window_games)
         ends.append(window["GAME_DATE"].max())
         lengths.append(len(window))
     return debuts.assign(window_end_date=ends, window_team_games=lengths)
@@ -121,12 +130,12 @@ def add_team_and_opponent(games: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Da
     return out[out["OPP_TEAM_ID"] != out["TEAM_ID"]]
 
 
-def main() -> None:
+def main(window: int = WINDOW) -> None:
     draft = pd.read_csv(PROC_DIR / "draft_classes.csv")
     player_logs = load_logs("player")
     team_logs = load_logs("team")
 
-    debuts = add_window_end(find_debuts(draft, player_logs), team_logs)
+    debuts = add_window_end(find_debuts(draft, player_logs), team_logs, window)
     games = add_team_and_opponent(cut_window_games(debuts, player_logs), team_logs)
 
     # Clean up the game table: snake_case, only the columns we need
@@ -145,7 +154,7 @@ def main() -> None:
     assert not games.duplicated(["player_id", "game_id"]).any(), "duplicate game"
     assert games["team_pts"].notna().all(), "missing team totals"
     assert games["opp_pts"].notna().all(), "missing opponent totals"
-    assert (debuts["window_team_games"] <= WINDOW).all()
+    assert (debuts["window_team_games"] <= window).all()
 
     # One row per drafted player, with debut info and a window summary
     summary = games.groupby("player_id").agg(
@@ -158,16 +167,21 @@ def main() -> None:
     )
     table["debuted"] = table["debut_date"].notna()
 
-    table.to_csv(PROC_DIR / "rookie_debuts.csv", index=False)
-    games.to_csv(PROC_DIR / "rookie_window_games.csv", index=False)
+    suffix = window_suffix(window)
+    table.to_csv(PROC_DIR / f"rookie_debuts{suffix}.csv", index=False)
+    games.to_csv(PROC_DIR / f"rookie_window_games{suffix}.csv", index=False)
 
     n_debut = table["debuted"].sum()
+    print(f"Window: {window} team games")
     print(f"Drafted players: {len(table)}")
     print(f"Debuted: {n_debut}  |  never debuted: {len(table) - n_debut}")
     print(f"Window games saved: {len(games)}")
-    print(f"Short windows (< {WINDOW} team games): "
-          f"{(table['window_team_games'] < WINDOW).sum()}")
+    print(f"Short windows (< {window} team games): "
+          f"{(table['window_team_games'] < window).sum()}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--window", type=int, default=WINDOW,
+                        help="window length in team games (default: 25)")
+    main(parser.parse_args().window)

@@ -27,6 +27,9 @@ Team and role features (all known by the end of the window):
     rel_pm36                         on-court +/- relative to the team's margin
     rotation_rank                    rank in team minutes during the window
     position                         BBRef position, 1 (PG) to 5 (C)
+    young_minutes_share              share of team minutes to other 1st/2nd-year players
+    ts_add36                         points per 36 above league-average efficiency
+                                     on the same shots (volume-weighted efficiency)
 
 Inputs:
     data/processed/rookie_debuts.csv         (src/build_rookie_window.py)
@@ -35,16 +38,21 @@ Inputs:
     data/raw/gamelogs/team_*.csv             (src/fetch_gamelogs.py)
 
 Outputs:
-    data/processed/features.csv     one row per debuted player (no target)
-    data/processed/model_table.csv  in-scope players: features + target
+    data/processed/features.csv                one row per debuted player (no target)
+    data/processed/model_table.csv             in-scope players: features + target
+    data/processed/model_table_all_ages.csv    same without the age cut (robustness)
 
 Run from the project root:
-    python src/build_features.py
+    python src/build_features.py              # the main 25-game window
+    python src/build_features.py --window 10  # reads/writes the *_w10.csv files
 """
 
+import argparse
 from pathlib import Path
 
 import pandas as pd
+
+from build_rookie_window import WINDOW, window_suffix
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw" / "gamelogs"
@@ -236,9 +244,8 @@ def relative_plus_minus(games: pd.DataFrame, k: float = 800) -> pd.Series:
     return (rel.fillna(0) * g["minutes"] + rookie_avg * k) / (g["minutes"] + k)
 
 
-def rotation_rank(debuts: pd.DataFrame) -> pd.Series:
-    """The rookie's rank in total minutes on his debut team during his window
-    (1 = most minutes on the team). Measures the competition for minutes."""
+def load_player_logs() -> pd.DataFrame:
+    """Minutes of every player in every game (all downloaded seasons)."""
     frames = []
     for path in sorted(RAW_DIR.glob("player_*.csv")):
         df = pd.read_csv(path, usecols=["PLAYER_ID", "TEAM_ABBREVIATION",
@@ -247,17 +254,70 @@ def rotation_rank(debuts: pd.DataFrame) -> pd.Series:
         frames.append(df)
     logs = pd.concat(frames, ignore_index=True)
     logs["GAME_DATE"] = pd.to_datetime(logs["GAME_DATE"])
+    return logs
 
+
+def team_window_minutes(debuts: pd.DataFrame, logs: pd.DataFrame) -> pd.DataFrame:
+    """Minutes of every player of the rookie's debut team during his window.
+
+    One row per (rookie `player_id`, teammate `PLAYER_ID`); the rookie
+    himself is included as one of the rows.
+    """
     d = debuts[["player_id", "debut_season", "debut_team", "debut_date",
                 "window_end_date"]].reset_index(drop=True)
     m = d.merge(logs, left_on=["debut_season", "debut_team"],
                 right_on=["season", "TEAM_ABBREVIATION"])
     m = m[(m["GAME_DATE"] >= m["debut_date"]) & (m["GAME_DATE"] <= m["window_end_date"])]
-    team_minutes = m.groupby(["player_id", "PLAYER_ID"])["MIN"].sum().reset_index()
-    team_minutes["rank"] = (team_minutes.groupby("player_id")["MIN"]
+    out = m.groupby(["player_id", "PLAYER_ID"])["MIN"].sum().reset_index()
+    out["season_start"] = out["player_id"].map(
+        debuts.set_index("player_id")["debut_season"].str[:4].astype(int))
+    return out
+
+
+def rotation_rank(team_minutes: pd.DataFrame) -> pd.Series:
+    """The rookie's rank in total minutes on his debut team during his window
+    (1 = most minutes on the team). Measures the competition for minutes."""
+    t = team_minutes.assign(rank=team_minutes.groupby("player_id")["MIN"]
                             .rank(ascending=False, method="min"))
-    own = team_minutes[team_minutes["player_id"] == team_minutes["PLAYER_ID"]]
+    own = t[t["player_id"] == t["PLAYER_ID"]]
     return own.set_index("player_id")["rank"]
+
+
+def young_minutes_share(team_minutes: pd.DataFrame, logs: pd.DataFrame) -> pd.Series:
+    """Share of the team's window minutes played by OTHER first- and
+    second-year players: a team in "development mode" hands minutes to youth.
+
+    NBA experience = seasons since a player's first logged game. The logs
+    start in 1999-00, so for players first seen then we use the draft year
+    (drafted 1998 or later = young); otherwise they count as veterans.
+    """
+    first_season = logs.groupby("PLAYER_ID")["season"].min().str[:4].astype(int)
+    draft = pd.read_csv(ROOT / "data" / "raw" / "draft_history.csv",
+                        usecols=["PERSON_ID", "SEASON"]).drop_duplicates("PERSON_ID")
+    draft_year = draft.set_index("PERSON_ID")["SEASON"]
+    data_start = first_season.min()
+    unknown = (first_season == data_start) & ~(draft_year.reindex(first_season.index) >= data_start - 1)
+    first_season[unknown] = -9999  # veteran from before the data
+
+    t = team_minutes.assign(first=team_minutes["PLAYER_ID"].map(first_season))
+    t["young"] = (t["season_start"] - t["first"]) <= 1
+    others = t[t["player_id"] != t["PLAYER_ID"]]
+    young = others[others["young"]].groupby("player_id")["MIN"].sum()
+    total = t.groupby("player_id")["MIN"].sum()
+    return young.reindex(total.index, fill_value=0) / total
+
+
+def ts_added36(games: pd.DataFrame, feats: pd.DataFrame) -> pd.Series:
+    """Points per 36 minutes above (or below) what a league-average shooter
+    would score on the same shots: efficiency weighted by volume.
+
+    Uses the era-adjusted, shrunk TS% (`ts_pct`, relative to the league) times
+    the shooting volume. "Empty volume" (many shots, poor efficiency) is very
+    negative; a low-volume player sits near 0 even if he shoots poorly.
+    """
+    g = games.groupby("player_id")[["fga", "fta", "min"]].sum()
+    shots36 = 2 * (g["fga"] + 0.44 * g["fta"]) * 36 / g["min"].where(g["min"] > 0)
+    return (feats["ts_pct"] * shots36).fillna(0)
 
 
 POSITION_NUMBER = {"PG": 1, "SG": 2, "SF": 3, "PF": 4, "C": 5}
@@ -281,11 +341,12 @@ def position(target: pd.DataFrame) -> pd.Series:
     return numbers.map(POSITION_NUMBER)
 
 
-def main() -> None:
-    debuts = pd.read_csv(PROC_DIR / "rookie_debuts.csv",
+def main(window: int = WINDOW) -> None:
+    suffix = window_suffix(window)
+    debuts = pd.read_csv(PROC_DIR / f"rookie_debuts{suffix}.csv",
                          parse_dates=["debut_date", "window_end_date"])
     debuts = debuts[debuts["debuted"]].set_index("player_id", drop=False)
-    games = pd.read_csv(PROC_DIR / "rookie_window_games.csv",
+    games = pd.read_csv(PROC_DIR / f"rookie_window_games{suffix}.csv",
                         dtype={"game_id": str})
     target = pd.read_csv(PROC_DIR / "rookie_target.csv")
 
@@ -315,13 +376,19 @@ def main() -> None:
     # minutes") vs heavy minutes on a good one
     feats["mpg_x_team_net"] = feats["mpg"] * feats["team_net_window"]
     feats["rel_pm36"] = relative_plus_minus(games)
-    feats["rotation_rank"] = rotation_rank(debuts)
+    logs = load_player_logs()
+    team_minutes = team_window_minutes(debuts, logs)
+    feats["rotation_rank"] = rotation_rank(team_minutes)
     feats["position"] = position(target)
+
+    # "Empty volume" candidates (notebooks/07_empty_minutes.ipynb)
+    feats["young_minutes_share"] = young_minutes_share(team_minutes, logs)
+    feats["ts_add36"] = ts_added36(games, feats)
 
     feats = feats.reset_index()
     assert feats["player_id"].is_unique
     assert feats[list(RATE_STATS)].notna().all().all(), "NaN after shrinkage"
-    feats.to_csv(PROC_DIR / "features.csv", index=False)
+    feats.to_csv(PROC_DIR / f"features{suffix}.csv", index=False)
 
     # Final modelling table: in-scope players only, features + target
     target_cols = ["player_id", "player_name", "draft_year", "debut_season",
@@ -329,11 +396,21 @@ def main() -> None:
                    "mp_y3", "mp_y4", "bpm_y3", "bpm_y4", "target_vorp"]
     table = target.loc[target["in_scope"], target_cols].merge(
         feats, on="player_id", how="left", validate="one_to_one")
-    table.to_csv(PROC_DIR / "model_table.csv", index=False)
+    table.to_csv(PROC_DIR / f"model_table{suffix}.csv", index=False)
 
-    print(f"Features for {len(feats)} players -> features.csv")
+    # Robustness check: same table without the age cut (year 4 still required)
+    all_ages = target.loc[target["year4_complete"], target_cols].merge(
+        feats, on="player_id", how="left", validate="one_to_one")
+    all_ages.to_csv(PROC_DIR / f"model_table_all_ages{suffix}.csv", index=False)
+
+    print(f"Window: {window} team games")
+    print(f"Features for {len(feats)} players -> features{suffix}.csv")
     print(f"Model table: {len(table)} players x {table.shape[1]} columns")
+    print(f"Without the age cut: {len(all_ages)} players")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--window", type=int, default=WINDOW,
+                        help="window length in team games (default: 25)")
+    main(parser.parse_args().window)
