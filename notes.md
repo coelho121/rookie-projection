@@ -15,6 +15,8 @@
 - Built the target with `src/build_target.py`: 1180 players in scope
 - Built the features with `src/build_features.py`: `features.csv` (1200 players) and `model_table.csv` (1180 in scope, 49 columns)
 - Planned the modelling workflow: EDA, time split, pick-only baseline, Ridge and gradient boosting, metrics by segment, interpretation, comparables, robustness, current rookies
+- EDA notebook `notebooks/01_eda.ipynb`
+- Replaced the plain time split with walk-forward evaluation; set up `src/modelling.py` and the pick-only baseline in `notebooks/02_modelling.ipynb`
 
 ## Decisions
 
@@ -57,10 +59,15 @@
   - k values (judgment): TS% 200, 3P% 200, 3PA rate 50, FTA rate 100, pts/36 200, usage 200, ast/36 250, TOV% 150, ORB% 200, DRB% 150, stl/36 500, blk/36 250, PF/36 200, +/- per 36 800
   - The rookie average is pooled over all historical rookies (no target information, so no leakage)
 - No full BPM is computed for the window; the model gets its components instead
-- Time split: train on draft classes 2000-2016, test on 2017-2022. The test set is used once, at the end; all choices are made with cross-validation inside train, grouped by draft class
-  - Mirrors real use (learn from the past, predict the future) and avoids same-era leakage
+- Test classes: 2017-2022, evaluated once at the end with a **walk-forward** scheme: each test class gets its own model, trained only on players whose year 4 had already ended before that class's rookie season (e.g. class 2017 -> targets known by 2016-17, in practice classes up to 2013)
+  - Mirrors real use with no information from the future. A plain split (train 2000-2016) would have used year 3-4 outcomes from seasons after the test rookies debuted
+- Development set for cross-validation (model choice, tuning): players whose target was known before the first test rookie season (year 4 ended by 2016-17): 683 players, classes 2000-2013. 5 folds grouped by draft class (GroupKFold)
+  - Grouping by class keeps players of the same class/era out of train and validation at the same time
+  - A model must beat the baseline in most folds, not only on average
+  - All preprocessing that learns from data (e.g. scaling) is fitted inside each fold through a scikit-learn `Pipeline`
+  - Cross-validation also gives out-of-fold predictions, later used for the comparables
 - Main metric: RMSE (the costly errors are missed stars and top-pick busts), with MAE and Spearman correlation as checks, and results split by segment (picks 1-10, 11-30, 2nd round)
-- EDA uses the training classes only, so no decision is informed by the test set
+- EDA uses the classes drafted 2000-2016 only, so no decision is informed by the test set (it was done before the walk-forward scheme; classes 2014-2016 only shaped general impressions such as the U-shaped relations)
 
 ## Problems
 
@@ -89,3 +96,10 @@
 - Only 14 players debuted older than 25; 8 more lack a completed year 4
 - League TS% rose from 51.8% (2000-01) to 58.1% (2025-26) and 3PA rate from 17% to 41.5%, which confirms the need for era adjustment
 - Strongest single correlations with the target (Spearman): minutes per game 0.35, games played 0.32, pick −0.26, TS% 0.21, age −0.16. Early minutes beat pick on their own, but they are partly driven by pick
+- EDA (`notebooks/01_eda.ipynb`, classes 2000-2016, 849 players):
+  - Year 3 and year 4 VORP correlate at r = 0.79, so summing both years gives a stable target
+  - Out-of-league share by year 3 grows with pick: ~2% for picks 1-15, ~15% for 21-30, over 60% for 51-60
+  - Within each pick segment, more early minutes go with more value later: the minutes signal is not only the pick in disguise
+  - Features most related to value beyond the pick (Spearman with actual minus pick-expected): TS% +0.17, mpg +0.16, stl/36 +0.16, +/- per 36 +0.15, ast/36 +0.14
+  - Several features have U-shaped relations with the target (ORB%, blk/36, PF/36, 3PA rate), likely a position effect, which favours non-linear models
+  - Some busts looked fine early (Wiggins 31 mpg as a rookie), so part of the bust risk is invisible in 25 games
