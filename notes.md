@@ -36,6 +36,11 @@
   - No leakage (age is known at debut) and no survivorship bias (the cut doesn't depend on the outcome); it only defines the scope
   - Age comes from the Basketball-Reference season tables (age on Feb 1 of the season), applied when building the target
   - At the end, rerun the model without the cut as a robustness check
+- Negative VORP is kept in the target (playing many bad minutes is a real cost), even though it ranks some busts below players who left the league (VORP 0)
+- How results are communicated: a single predicted VORP is shrunk toward the mean and hides uncertainty, so each player's prediction is compared with historical players who got a similar *predicted* VORP, and their *actual* outcomes give tier probabilities (e.g. 15% All-Star, 40% starter...) plus named comparables
+  - Tier cut-offs are set from the real VORP distribution at the end
+  - Minutes and BPM of years 3-4 are kept (not as targets) to describe the comparables
+- Two final deliverables: (1) does the 25-game window beat draft position alone, by how much and for whom; (2) projections for the current rookie class once they reach 25 games
 
 ## Problems
 
