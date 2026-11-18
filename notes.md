@@ -67,6 +67,7 @@
   - All preprocessing that learns from data (e.g. scaling) is fitted inside each fold through a scikit-learn `Pipeline`
   - Cross-validation also gives out-of-fold predictions, later used for the comparables
 - Main metric: RMSE (the costly errors are missed stars and top-pick busts), with MAE and Spearman correlation as checks, and results split by segment (picks 1-10, 11-30, 2nd round)
+- Baseline = quadratic regression on log(pick), chosen by CV among mean-only, linear on pick, quadratic on log(pick) and isotonic on pick
 - EDA uses the classes drafted 2000-2016 only, so no decision is informed by the test set (it was done before the walk-forward scheme; classes 2014-2016 only shaped general impressions such as the U-shaped relations)
 
 ## Problems
@@ -103,3 +104,7 @@
   - Features most related to value beyond the pick (Spearman with actual minus pick-expected): TS% +0.17, mpg +0.16, stl/36 +0.16, +/- per 36 +0.15, ast/36 +0.14
   - Several features have U-shaped relations with the target (ORB%, blk/36, PF/36, 3PA rate), likely a position effect, which favours non-linear models
   - Some busts looked fine early (Wiggins 31 mpg as a rookie), so part of the bust risk is invisible in 25 games
+- Baseline CV scores (dev set, 683 players): RMSE 2.12 ± 0.30, MAE 1.38, Spearman 0.27 (mean-only: RMSE 2.31). The pick alone explains little
+- Any decreasing function of pick ranks players the same way, so the baseline's Spearman is fixed (~0.27); a better ranking can only come from the window features
+- Baseline errors concentrate in picks 1-10 (RMSE 3.5 vs 1.8 for picks 11-30 and 1.2 for the 2nd round)
+- Its biggest misses are early stars (Chris Paul, LeBron, Wade, Durant, Giannis, Draymond) and top-pick busts (Bennett, Kwame Brown, Oden, Turner)
