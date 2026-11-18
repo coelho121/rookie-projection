@@ -4,9 +4,10 @@ Source: stats.nba.com LeagueGameLog endpoint (via nba_api). One request returns
 every game of one season, so we need ~2 requests per season instead of one
 request per player.
 
-Seasons: 2000-01 (first draft class) to 2025-26 (last completed season), so
-late debuts from the 2022 class are covered. The 2026-27 season is still in
-progress and is not downloaded.
+Seasons: 1999-00 to 2025-26 (last completed season). 1999-00 is only needed
+for the previous-season team rating of 2000-01 rookies; 2025-26 covers late
+debuts from the 2022 class. The 2026-27 season is still in progress and is
+not downloaded.
 
 Outputs (one file per season and mode, never re-downloaded):
     data/raw/gamelogs/player_2000-01.csv
@@ -25,7 +26,7 @@ from nba_api.stats.endpoints import leaguegamelog
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw" / "gamelogs"
 
-FIRST_SEASON = 2000  # start year of the 2000-01 season
+FIRST_SEASON = 1999  # start year of the 1999-00 season (previous-season team rating)
 LAST_SEASON = 2025   # start year of the 2025-26 season
 MODES = {"player": "P", "team": "T"}
 

@@ -20,6 +20,14 @@ exactly 20%, one fifth of the team).
 The rookie average is pooled over all historical rookies. It uses no target
 information, so it doesn't leak the outcome.
 
+Team and role features (all known by the end of the window):
+    team_net_window / team_net_prev  debut team's net rating in the window and
+                                     over the previous season
+    mpg_x_team_net                   minutes weighted by team quality
+    rel_pm36                         on-court +/- relative to the team's margin
+    rotation_rank                    rank in team minutes during the window
+    position                         BBRef position, 1 (PG) to 5 (C)
+
 Inputs:
     data/processed/rookie_debuts.csv         (src/build_rookie_window.py)
     data/processed/rookie_window_games.csv   (src/build_rookie_window.py)
@@ -40,6 +48,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw" / "gamelogs"
+BBREF_DIR = ROOT / "data" / "raw" / "bbref"
 PROC_DIR = ROOT / "data" / "processed"
 
 
@@ -165,6 +174,113 @@ def team_win_pct(debuts: pd.DataFrame, teams: pd.DataFrame) -> pd.Series:
     return m.assign(win=m["wl"] == "W").groupby("player_id")["win"].mean()
 
 
+def season_label(start_year: int) -> str:
+    """1999 -> '1999-00'."""
+    return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+def possessions(df: pd.DataFrame, prefix: str = "") -> pd.Series:
+    """Standard possession estimate from box-score totals."""
+    return (df[f"{prefix}fga"] + 0.44 * df[f"{prefix}fta"]
+            - df[f"{prefix}oreb"] + df[f"{prefix}tov"])
+
+
+def team_strength(debuts: pd.DataFrame, teams: pd.DataFrame) -> pd.DataFrame:
+    """Net rating (point margin per 100 possessions) of the debut team.
+
+    team_net_window: during the player's window (known at window end).
+    team_net_prev:   over the whole previous season (known before the season).
+                     Expansion teams have no previous season: use the window value.
+    Team ids are stable across relocations (e.g. Seattle -> Oklahoma City),
+    so the previous season is looked up by id, not by abbreviation.
+    """
+    t = teams.assign(
+        poss=0.5 * (possessions(teams) + possessions(teams, "opp_")),
+        margin=teams["pts"] - teams["opp_pts"],
+    )
+    by_season = t.groupby(["season", "team_id"])[["margin", "poss"]].sum()
+    season_net = 100 * by_season["margin"] / by_season["poss"]
+    team_id = (t.drop_duplicates(["season", "team_abbreviation"])
+               .set_index(["season", "team_abbreviation"])["team_id"])
+
+    d = debuts[["player_id", "debut_season", "debut_team", "debut_date",
+                "window_end_date"]].reset_index(drop=True)
+    d["team_id"] = team_id.reindex(list(zip(d["debut_season"], d["debut_team"]))).to_numpy()
+    prev = (d["debut_season"].str[:4].astype(int) - 1).map(season_label)
+    d["team_net_prev"] = season_net.reindex(list(zip(prev, d["team_id"]))).to_numpy()
+
+    w = d.merge(t[["season", "team_id", "game_date", "margin", "poss"]],
+                left_on=["debut_season", "team_id"], right_on=["season", "team_id"])
+    w = w[(w["game_date"] >= w["debut_date"]) & (w["game_date"] <= w["window_end_date"])]
+    window = w.groupby("player_id")[["margin", "poss"]].sum()
+
+    out = d.set_index("player_id")[["team_net_prev"]]
+    out["team_net_window"] = 100 * window["margin"] / window["poss"]
+    out["team_net_prev"] = out["team_net_prev"].fillna(out["team_net_window"])
+    return out
+
+
+def relative_plus_minus(games: pd.DataFrame, k: float = 800) -> pd.Series:
+    """On-court +/- per 36 minus the team's margin per 36 in the same games.
+
+    Plain +/- mostly reflects the teammates (a good rookie on a bad team is
+    negative). Comparing with the team's margin over the whole game asks
+    instead "does the team do better or worse while he's on the floor?",
+    a rough on/off. Shrunk toward the average rookie like the rate stats.
+    """
+    expected = games["min"] * (games["team_pts"] - games["opp_pts"]) / (games["team_min"] / 5)
+    g = games.assign(expected=expected).groupby("player_id").agg(
+        pm=("plus_minus", "sum"), expected=("expected", "sum"), minutes=("min", "sum"))
+    rel = 36 * (g["pm"] - g["expected"]) / g["minutes"].where(g["minutes"] > 0)
+    rookie_avg = (rel * g["minutes"]).sum() / g.loc[rel.notna(), "minutes"].sum()
+    return (rel.fillna(0) * g["minutes"] + rookie_avg * k) / (g["minutes"] + k)
+
+
+def rotation_rank(debuts: pd.DataFrame) -> pd.Series:
+    """The rookie's rank in total minutes on his debut team during his window
+    (1 = most minutes on the team). Measures the competition for minutes."""
+    frames = []
+    for path in sorted(RAW_DIR.glob("player_*.csv")):
+        df = pd.read_csv(path, usecols=["PLAYER_ID", "TEAM_ABBREVIATION",
+                                        "GAME_DATE", "MIN"])
+        df["season"] = path.stem.split("_")[1]
+        frames.append(df)
+    logs = pd.concat(frames, ignore_index=True)
+    logs["GAME_DATE"] = pd.to_datetime(logs["GAME_DATE"])
+
+    d = debuts[["player_id", "debut_season", "debut_team", "debut_date",
+                "window_end_date"]].reset_index(drop=True)
+    m = d.merge(logs, left_on=["debut_season", "debut_team"],
+                right_on=["season", "TEAM_ABBREVIATION"])
+    m = m[(m["GAME_DATE"] >= m["debut_date"]) & (m["GAME_DATE"] <= m["window_end_date"])]
+    team_minutes = m.groupby(["player_id", "PLAYER_ID"])["MIN"].sum().reset_index()
+    team_minutes["rank"] = (team_minutes.groupby("player_id")["MIN"]
+                            .rank(ascending=False, method="min"))
+    own = team_minutes[team_minutes["player_id"] == team_minutes["PLAYER_ID"]]
+    return own.set_index("player_id")["rank"]
+
+
+POSITION_NUMBER = {"PG": 1, "SG": 2, "SF": 3, "PF": 4, "C": 5}
+
+
+def position(target: pd.DataFrame) -> pd.Series:
+    """Basketball-Reference position in the debut season, as 1 (PG) to 5 (C).
+
+    Known from the draft profile, so no leakage. Hybrid labels ('SG-PG')
+    keep the first one.
+    """
+    adv = pd.read_csv(BBREF_DIR / "Advanced.csv")
+    adv = adv[adv["lg"] == "NBA"]
+    n_rows = adv.groupby(["season", "player_id"])["team"].transform("size")
+    adv = adv[(n_rows == 1) | adv["team"].str.fullmatch(r"\d+TM")]
+    pos = adv.set_index(["player_id", "season"])["pos"]
+
+    end_year = target["debut_season"].str[:4].astype(int) + 1
+    labels = pos.reindex(list(zip(target["bbref_id"], end_year))).to_numpy()
+    numbers = pd.Series(labels, index=target["player_id"]).str.split("-").str[0]
+    return numbers.map(POSITION_NUMBER)
+
+
 def main() -> None:
     debuts = pd.read_csv(PROC_DIR / "rookie_debuts.csv",
                          parse_dates=["debut_date", "window_end_date"])
@@ -192,6 +308,15 @@ def main() -> None:
     feats["debut_lag"] = (
         debuts["debut_season"].str[:4].astype(int) - debuts["draft_year"])
     feats["team_win_pct"] = team_win_pct(debuts, teams)
+
+    # Team and role (added after the interpretation step, see notes.md)
+    feats = feats.join(team_strength(debuts, teams))
+    # Minutes weighted by team quality: heavy minutes on a bad team ("empty
+    # minutes") vs heavy minutes on a good one
+    feats["mpg_x_team_net"] = feats["mpg"] * feats["team_net_window"]
+    feats["rel_pm36"] = relative_plus_minus(games)
+    feats["rotation_rank"] = rotation_rank(debuts)
+    feats["position"] = position(target)
 
     feats = feats.reset_index()
     assert feats["player_id"].is_unique
