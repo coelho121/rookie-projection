@@ -74,16 +74,37 @@ def cross_validate(make_model: Callable, features: list[str],
     Returns per-fold metrics and the out-of-fold predictions (each player
     predicted by a model that never saw him).
     """
-    folds = GroupKFold(n_splits=N_FOLDS)
+    return _run_folds(make_model, features, dev, GroupKFold(n_splits=N_FOLDS))
+
+
+def repeated_cv(make_model: Callable, features: list[str], dev: pd.DataFrame,
+                repeats: int = 5) -> tuple[pd.DataFrame, pd.Series]:
+    """Grouped 5-fold CV repeated with different class-to-fold assignments.
+
+    With ~700 players a single 5-fold split is noisy (one superstar can swing
+    a fold), so model comparisons use 5 x 5 = 25 evaluations. Returns metrics
+    per (repeat, fold) and the out-of-fold predictions averaged over repeats.
+    """
+    tables, oofs = [], []
+    for r in range(repeats):
+        folds = GroupKFold(n_splits=N_FOLDS, shuffle=True, random_state=r)
+        table, oof = _run_folds(make_model, features, dev, folds)
+        tables.append(table.assign(repeat=r + 1))
+        oofs.append(oof)
+    return pd.concat(tables, ignore_index=True), pd.concat(oofs, axis=1).mean(axis=1)
+
+
+def _run_folds(make_model, features, dev, folds) -> tuple[pd.DataFrame, pd.Series]:
+    """Fit on each training split, predict the held-out classes."""
     oof = pd.Series(np.nan, index=dev.index)
     rows = []
     for k, (tr, va) in enumerate(folds.split(dev, groups=dev["draft_year"])):
-        model = make_model().fit(dev.loc[tr, features], dev.loc[tr, TARGET])
-        pred = model.predict(dev.loc[va, features])
+        model = make_model().fit(dev.iloc[tr][features], dev.iloc[tr][TARGET])
+        pred = model.predict(dev.iloc[va][features])
         oof.iloc[va] = pred
-        classes = sorted(dev.loc[va, "draft_year"].unique())
+        classes = sorted(dev.iloc[va]["draft_year"].unique())
         rows.append({"fold": k + 1, "classes": classes, "n": len(va),
-                     **metrics(dev.loc[va, TARGET], pred)})
+                     **metrics(dev.iloc[va][TARGET], pred)})
     return pd.DataFrame(rows), oof
 
 
