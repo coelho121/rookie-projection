@@ -10,6 +10,10 @@
 - Downloaded regular-season game logs 2000-01 to 2025-26 (player and team) with `src/fetch_gamelogs.py`
 - Built debuts and the 25-game window with `src/build_rookie_window.py`: 1200 players debuted, 167 never did
 
+### 2026-11-18
+- Got VORP / BPM / minutes / age from the Kaggle mirror of Basketball-Reference with `src/fetch_bbref.py`
+- Built the target with `src/build_target.py`: 1180 players in scope
+
 ## Decisions
 
 ### 2026-11-17
@@ -41,6 +45,10 @@
   - Tier cut-offs are set from the real VORP distribution at the end
   - Minutes and BPM of years 3-4 are kept (not as targets) to describe the comparables
 - Two final deliverables: (1) does the 25-game window beat draft position alone, by how much and for whom; (2) projections for the current rookie class once they reach 25 games
+- Basketball-Reference data comes from the Kaggle dataset "NBA Stats (1947-present)" (Sumitro Datta, CC0), because basketball-reference.com blocks automated clients with a Cloudflare challenge
+  - Validated against known BBRef values (LeBron 2008-09 VORP 11.8, Jokić 2021-22 VORP 9.8) and against nba_api logs (games match 99.9%, minutes within 2% in 98.5% of player-seasons)
+- NBA and BBRef ids are linked through the draft: same year + normalized name, then same year + pick, then one manual fix
+- Traded players: only the season-total row (`2TM`, `3TM`) is used, so VORP isn't counted twice
 
 ## Problems
 
@@ -51,6 +59,10 @@
 - Game logs only list games a player appeared in, so injury absences can't be told apart from coach's decisions (the DNP reason is only in per-game box scores, which would take tens of thousands of requests)
 - Injuries in years 3-4 lower the target, and no model built on 25 games can foresee them. This is unexplainable noise and goes in the project's limitations
 
+### 2026-11-18
+- In 2001 and 2002, NBA pick numbers from pick 29 on are one lower than BBRef's (the NBA renumbered after Minnesota's forfeited pick), so pick number alone can't link the sources
+- BBRef values use BPM 2.0 (revised in 2020); older published numbers (e.g. Westbrook 2016-17 VORP 12.4) no longer match
+
 ## Findings
 
 ### 2026-11-17
@@ -59,3 +71,7 @@
 - Rookies played 15 of the 25 window games on average
 - 35 windows are shorter than 25 team games (late-season debuts, 6 of them in the COVID-shortened 2019-20 season)
 - Some draft-and-stash players debut 5 to 9 years after the draft (Scola, Mičić), already 27-28 years old
+
+### 2026-11-18
+- The target is very skewed: median 0, 242 players (20%) out of the league by year 3, 276 with negative VORP, max 19.2 (Chris Paul)
+- Only 14 players debuted older than 25; 8 more lack a completed year 4
