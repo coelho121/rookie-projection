@@ -13,6 +13,8 @@
 ### 2026-11-18
 - Got VORP / BPM / minutes / age from the Kaggle mirror of Basketball-Reference with `src/fetch_bbref.py`
 - Built the target with `src/build_target.py`: 1180 players in scope
+- Built the features with `src/build_features.py`: `features.csv` (1200 players) and `model_table.csv` (1180 in scope, 49 columns)
+- Planned the modelling workflow: EDA, time split, pick-only baseline, Ridge and gradient boosting, metrics by segment, interpretation, comparables, robustness, current rookies
 
 ## Decisions
 
@@ -49,6 +51,16 @@
   - Validated against known BBRef values (LeBron 2008-09 VORP 11.8, Jokić 2021-22 VORP 9.8) and against nba_api logs (games match 99.9%, minutes within 2% in 98.5% of player-seasons)
 - NBA and BBRef ids are linked through the draft: same year + normalized name, then same year + pick, then one manual fix
 - Traded players: only the season-total row (`2TM`, `3TM`) is used, so VORP isn't counted twice
+- Rate stats are summed over the window and then divided (never averaged per game)
+- Era adjustment: each rate stat is expressed relative to the league value for that season; league values come from the same formulas applied to team rows (league usage = exactly 20%)
+- Shrinkage toward the average rookie: `(value × n + rookie_avg × k) / (n + k)`, with n = the stat's own attempts for shooting stats and minutes for the rest
+  - k values (judgment): TS% 200, 3P% 200, 3PA rate 50, FTA rate 100, pts/36 200, usage 200, ast/36 250, TOV% 150, ORB% 200, DRB% 150, stl/36 500, blk/36 250, PF/36 200, +/- per 36 800
+  - The rookie average is pooled over all historical rookies (no target information, so no leakage)
+- No full BPM is computed for the window; the model gets its components instead
+- Time split: train on draft classes 2000-2016, test on 2017-2022. The test set is used once, at the end; all choices are made with cross-validation inside train, grouped by draft class
+  - Mirrors real use (learn from the past, predict the future) and avoids same-era leakage
+- Main metric: RMSE (the costly errors are missed stars and top-pick busts), with MAE and Spearman correlation as checks, and results split by segment (picks 1-10, 11-30, 2nd round)
+- EDA uses the training classes only, so no decision is informed by the test set
 
 ## Problems
 
@@ -75,3 +87,5 @@
 ### 2026-11-18
 - The target is very skewed: median 0, 242 players (20%) out of the league by year 3, 276 with negative VORP, max 19.2 (Chris Paul)
 - Only 14 players debuted older than 25; 8 more lack a completed year 4
+- League TS% rose from 51.8% (2000-01) to 58.1% (2025-26) and 3PA rate from 17% to 41.5%, which confirms the need for era adjustment
+- Strongest single correlations with the target (Spearman): minutes per game 0.35, games played 0.32, pick −0.26, TS% 0.21, age −0.16. Early minutes beat pick on their own, but they are partly driven by pick

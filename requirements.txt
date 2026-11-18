@@ -1,4 +1,8 @@
-﻿nba_api==1.12.0
+﻿ipykernel==7.4.0
+matplotlib==3.11.2
+nba_api==1.12.0
+nbclient==0.11.0
+nbformat==5.11.1
 numpy==2.2.6
 pandas==3.1.1
 requests==2.34.2
