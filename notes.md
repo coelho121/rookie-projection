@@ -7,6 +7,8 @@
 - Reviewed the core metrics (per-36, BPM, VORP) before choosing the target
 - Set up `.venv` and `requirements.txt`; added `data/` to `.gitignore`
 - Collected draft classes 2000-2022 (1367 picks) with `src/fetch_draft.py`
+- Downloaded regular-season game logs 2000-01 to 2025-26 (player and team) with `src/fetch_gamelogs.py`
+- Built debuts and the 25-game window with `src/build_rookie_window.py`: 1200 players debuted, 167 never did
 
 ## Decisions
 
@@ -26,6 +28,14 @@
   - Same window length for everyone, so no player gets extra information (avoids leakage)
   - Anchoring on the debut means players who debut mid-season still get a window
 - Injuries (for the features step): use rate stats and minutes per game *played* as the main signals, and treat games/minutes in the window as sample size, not quality. Consider shrinking small-sample stats toward typical values for the draft slot
+- The window is cut by dates (debut to 25th team game), not by game ids, so players traded during the window keep their games with the new team
+
+### 2026-11-18
+- Only players aged 25 or younger at debut are modelled (26+ are cut)
+  - Older debutants (mostly draft-and-stash) are a different population: their first games show an already-formed player, not a prospect, and their years 3-4 fall at 30+, in decline
+  - No leakage (age is known at debut) and no survivorship bias (the cut doesn't depend on the outcome); it only defines the scope
+  - Age comes from the Basketball-Reference season tables (age on Feb 1 of the season), applied when building the target
+  - At the end, rerun the model without the cut as a robustness check
 
 ## Problems
 
@@ -40,3 +50,7 @@
 
 ### 2026-11-17
 - Some classes have fewer than 60 picks (2000-2004, 2022). This is expected: only 29 teams existed before 2004, and some picks were forfeited
+- 163 of the 167 players who never debuted are second-rounders; the 4 first-rounders stayed in Europe (e.g. Fran Vázquez)
+- Rookies played 15 of the 25 window games on average
+- 35 windows are shorter than 25 team games (late-season debuts, 6 of them in the COVID-shortened 2019-20 season)
+- Some draft-and-stash players debut 5 to 9 years after the draft (Scola, Mičić), already 27-28 years old
