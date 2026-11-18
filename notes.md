@@ -17,6 +17,7 @@
 - Planned the modelling workflow: EDA, time split, pick-only baseline, Ridge and gradient boosting, metrics by segment, interpretation, comparables, robustness, current rookies
 - EDA notebook `notebooks/01_eda.ipynb`
 - Replaced the plain time split with walk-forward evaluation; set up `src/modelling.py` and the pick-only baseline in `notebooks/02_modelling.ipynb`
+- Step 3 in `notebooks/02_modelling.ipynb`: tuned and compared Ridge, Ridge + splines, gradient boosting and an ensemble; ablation by feature group; calibration; quantile models for floor and ceiling
 
 ## Decisions
 
@@ -68,6 +69,16 @@
   - Cross-validation also gives out-of-fold predictions, later used for the comparables
 - Main metric: RMSE (the costly errors are missed stars and top-pick busts), with MAE and Spearman correlation as checks, and results split by segment (picks 1-10, 11-30, 2nd round)
 - Baseline = quadratic regression on log(pick), chosen by CV among mean-only, linear on pick, quadratic on log(pick) and isotonic on pick
+- Feature models get the pick as log(pick) and log(pick)², like the baseline, so the window features only have to explain what the pick doesn't
+- Candidates: Ridge (linear, penalised), Ridge + splines (one smooth curve per feature, GAM-like, still interpretable), gradient boosting (`HistGradientBoostingRegressor`) and an ensemble averaging the best linear model and boosting. Random forest, XGBoost/LightGBM and neural nets were left out (weaker on extremes, same family, or too little data)
+- Model comparison uses repeated grouped CV (5 repeats × 5 folds = 25 paired splits); tuning uses the plain 5-fold CV
+- Tuned settings: Ridge alpha 30; Ridge + splines alpha 300 (5 knots); boosting 8 leaves, 40 min per leaf, 300 iterations, learning rate 0.03
+- Main model: **the ensemble** (Ridge + splines averaged with gradient boosting). Its edge over plain Ridge is small (beats it in 15/25 splits), but every difference goes where this project's priorities are: lower RMSE overall and at picks 1-10, better calibration at the top, bolder top predictions. Plain Ridge only wins on ranking 2nd-rounders, the least important segment
+  - First chose plain Ridge by the generic "simpler wins a tie" rule; switched because accuracy at the top picks matters more here than simplicity
+  - Interpretation stays possible: spline curves for the linear half, permutation importance for the whole model
+  - Chosen before the walk-forward test, so the test result can't influence the choice
+- Results are not made "bolder" by stretching predictions (that would be dishonest and raise the error). Upside is shown instead through quantile models (p10 floor, p50 central case, p90 ceiling) and, later, tier probabilities from comparables
+- Two kinds of comparables for step 6: neighbours in *predicted value* (for tier probabilities) and neighbours in *feature space* (k-NN on the window profile, for "plays like X" names)
 - EDA uses the classes drafted 2000-2016 only, so no decision is informed by the test set (it was done before the walk-forward scheme; classes 2014-2016 only shaped general impressions such as the U-shaped relations)
 
 ## Problems
@@ -108,3 +119,9 @@
 - Any decreasing function of pick ranks players the same way, so the baseline's Spearman is fixed (~0.27); a better ranking can only come from the window features
 - Baseline errors concentrate in picks 1-10 (RMSE 3.5 vs 1.8 for picks 11-30 and 1.2 for the 2nd round)
 - Its biggest misses are early stars (Chris Paul, LeBron, Wade, Durant, Giannis, Draymond) and top-pick busts (Bennett, Kwame Brown, Oden, Turner)
+- **Window features beat the pick-only baseline** (repeated CV): ensemble RMSE 2.10 → 1.89 (−10%), MAE 1.38 → 1.23, Spearman 0.27 → 0.44, better in 24 of 25 splits. Plain Ridge is almost the same (RMSE 1.90, Spearman 0.47)
+- Gain is largest at picks 1-10 (ensemble RMSE 3.52 → 3.00, Spearman 0.19 → 0.52); within picks 11-30 the ranking goes from none (−0.04) to 0.40; 2nd round: RMSE 1.24 → 1.22, Spearman 0.01 → 0.27 (plain Ridge ranks 2nd-rounders better: 0.35)
+- Gradient boosting is the weakest feature model (beats Ridge in 5/25 splits): with 683 players a regularised linear model wins, and the U shapes from the EDA don't pay off
+- Ablation (Ridge + splines): pick 2.12 → + context 2.12 → + opportunity 1.94 → + production 1.91. Opportunity (minutes, games) brings ~85% of the gain; production adds a smaller extra; context adds nothing beyond the pick. The early games help mostly because they reveal the coach's trust
+- The ensemble is well calibrated (top decile predicted 4.3 vs actual 4.35) and less conservative than the baseline (max prediction 8.8 vs 5.6; 18 players predicted ≥ 5 vs 12). Plain Ridge is slightly timid at the top (top decile 4.2 vs 4.5; max 6.9)
+- Quantile models: features improve the p90 ceiling most (pinball loss −12%); coverage is a bit narrow (15% of players exceed p90 instead of 10%). Busts get low central cases (Bennett, Kwame Brown ~1 vs ~6 expected from the pick), but superstars (LeBron, CP3, Durant) land far above any ceiling: 25 games can't tell an All-Star from the best player in the world
