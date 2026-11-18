@@ -18,6 +18,8 @@
 - EDA notebook `notebooks/01_eda.ipynb`
 - Replaced the plain time split with walk-forward evaluation; set up `src/modelling.py` and the pick-only baseline in `notebooks/02_modelling.ipynb`
 - Step 3 in `notebooks/02_modelling.ipynb`: tuned and compared Ridge, Ridge + splines, gradient boosting and an ensemble; ablation by feature group; calibration; quantile models for floor and ceiling
+- Step 5: interpretation notebook `notebooks/03_interpretation.ipynb`; final model definitions moved to `src/models.py` (reproduces CV RMSE 1.889)
+- Tested team and role features in `notebooks/04_team_features.ipynb`; downloaded the 1999-00 season for the previous-season team rating
 
 ## Decisions
 
@@ -79,6 +81,9 @@
   - Chosen before the walk-forward test, so the test result can't influence the choice
 - Results are not made "bolder" by stretching predictions (that would be dishonest and raise the error). Upside is shown instead through quantile models (p10 floor, p50 central case, p90 ceiling) and, later, tier probabilities from comparables
 - Two kinds of comparables for step 6: neighbours in *predicted value* (for tier probabilities) and neighbours in *feature space* (k-NN on the window profile, for "plays like X" names)
+- Interpretation uses out-of-fold permutation importance (single features and whole groups shuffled together, since correlated features share importance) and partial dependence curves on a model fitted to the whole development set
+- The honest "added value" of a feature group is the ablation (retrained without it); permutation importance shows how much the fitted model leans on it
+- Team and role features (team net rating in the window and the previous season, minutes × team quality, +/- relative to the team, rotation rank, position) were tested as a group, with the rule set before testing: kept only if they beat the current model on the same 25 splits. **Rejected**: they stay in `model_table.csv` (documented) but not in the model
 - EDA uses the classes drafted 2000-2016 only, so no decision is informed by the test set (it was done before the walk-forward scheme; classes 2014-2016 only shaped general impressions such as the U-shaped relations)
 
 ## Problems
@@ -93,6 +98,7 @@
 ### 2026-11-18
 - In 2001 and 2002, NBA pick numbers from pick 29 on are one lower than BBRef's (the NBA renumbered after Minnesota's forfeited pick), so pick number alone can't link the sources
 - BBRef values use BPM 2.0 (revised in 2020); older published numbers (e.g. Westbrook 2016-17 VORP 12.4) no longer match
+- "Empty minutes" (heavy early minutes on weak teams: Carter-Williams, Tyreke Evans, O.J. Mayo, Jonny Flynn) remain a known limitation; team-context features didn't fix them
 
 ## Findings
 
@@ -125,3 +131,13 @@
 - Ablation (Ridge + splines): pick 2.12 → + context 2.12 → + opportunity 1.94 → + production 1.91. Opportunity (minutes, games) brings ~85% of the gain; production adds a smaller extra; context adds nothing beyond the pick. The early games help mostly because they reveal the coach's trust
 - The ensemble is well calibrated (top decile predicted 4.3 vs actual 4.35) and less conservative than the baseline (max prediction 8.8 vs 5.6; 18 players predicted ≥ 5 vs 12). Plain Ridge is slightly timid at the top (top decile 4.2 vs 4.5; max 6.9)
 - Quantile models: features improve the p90 ceiling most (pinball loss −12%); coverage is a bit narrow (15% of players exceed p90 instead of 10%). Busts get low central cases (Bennett, Kwame Brown ~1 vs ~6 expected from the pick), but superstars (LeBron, CP3, Durant) land far above any ceiling: 25 games can't tell an All-Star from the best player in the world
+- Permutation importance by group (RMSE increase): opportunity +0.33, production +0.17, context +0.04, pick +0.02. With minutes in the model, the pick adds almost nothing: coaches already give top picks minutes
+- Top single features: mpg, ast/36, total minutes, ORB%, age, stl/36. TS% and +/- per 36 are ~0: too noisy over 25 games and covered by other features
+- Shapes: mpg rises steadily with a jump past ~28 mpg (starter minutes); younger is better until ~23, then flat; assists, steals, rebounding and FT rate are all "more is better" (no U shapes)
+- No interaction between minutes and pick: 10 → 30 mpg adds ~+2.0 VORP for picks 3, 15 and 45 alike; the effects simply add up
+- The model is closer than the baseline for 61% of players. Corrected upward: CP3, Rose, Lillard, Westbrook, Marc Gasol (#48), Tony Parker (#28); downward: Bennett, Kwame Brown, Bargnani
+- Main failure mode: "empty minutes" on bad teams (Carter-Williams predicted 6.6 vs 0.2, Tyreke Evans, O.J. Mayo, Jonny Flynn): heavy early minutes and usage that came from a weak roster, not from quality
+- No systematic bias by draft class (no drift, good for the walk-forward test) or by age; picks 1-10 slightly under-predicted (+0.15, the superstars), within noise
+- Team features don't help: ensemble + team RMSE 1.899 vs 1.889 (better in only 10/25 splits); Ridge + team 1.903 vs 1.904 (14/25). Added one at a time, none beats noise (best: position −0.002)
+- Over-prediction on bad teams is not systematic: by team-quality quintile the errors go −0.22, +0.22, −0.03, −0.08, +0.09, with no trend. The "empty minutes" busts are individual cases, not a learnable pattern
+- Team information is largely already in the model: rotation rank overlaps with minutes per game, and team quality with the pick (bad teams pick first)
