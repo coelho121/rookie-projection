@@ -133,10 +133,13 @@ def num_den(games: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     return pd.DataFrame(parts).join(games[keys]).groupby(keys).sum()
 
 
-def team_rows_as_players() -> pd.DataFrame:
-    """Team game logs shaped like player rows (team = a 240-minute player)."""
+def team_rows_as_players(paths=None) -> pd.DataFrame:
+    """Team game logs shaped like player rows (team = a 240-minute player).
+
+    paths: explicit team files to read (default: every downloaded season).
+    """
     frames = []
-    for path in sorted(RAW_DIR.glob("team_*.csv")):
+    for path in paths or sorted(RAW_DIR.glob("team_*.csv")):
         df = pd.read_csv(path, dtype={"GAME_ID": str})
         df["season"] = path.stem.split("_")[1]
         frames.append(df)
@@ -155,19 +158,32 @@ def team_rows_as_players() -> pd.DataFrame:
 
 
 def rate_features(games: pd.DataFrame, league: pd.DataFrame,
-                  season_of: pd.Series) -> pd.DataFrame:
-    """Era-adjusted, shrunk rate stats, one row per player."""
+                  season_of: pd.Series, priors: dict | None = None) -> pd.DataFrame:
+    """Era-adjusted, shrunk rate stats, one row per player.
+
+    priors: the average-rookie value of each stat to shrink toward. By default
+            it is pooled from `games` (all historical rookies). For the current
+            class, pass the historical priors instead, so this season's rookies
+            are pulled toward the historical average rookie, not toward each
+            other. The priors used are returned in `out.attrs["priors"]`.
+    """
     player = num_den(games, ["player_id"])
     out = pd.DataFrame(index=player.index)
+    used = {}
     for name, s in RATE_STATS.items():
         num, den = player[f"{name}__num"], player[f"{name}__den"]
         value = num / den.where(den > 0)  # NaN when there's no sample
         league_value = (league[f"{name}__num"] / league[f"{name}__den"])
         relative = value - season_of.map(league_value)
         n = den if s["base"] == "den" else player["min"]
-        rookie_avg = (relative * n).sum() / n[relative.notna()].sum()
+        if priors is None:
+            rookie_avg = (relative * n).sum() / n[relative.notna()].sum()
+        else:
+            rookie_avg = priors[name]
+        used[name] = rookie_avg
         out[name] = (relative.fillna(0) * n + rookie_avg * s["k"]) / (n + s["k"])
         out[f"{name}_raw"] = value  # unadjusted, for exploration only
+    out.attrs["priors"] = used
     return out
 
 

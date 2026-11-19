@@ -43,10 +43,14 @@ STATS = [
 ]
 
 
-def load_logs(mode: str) -> pd.DataFrame:
-    """Stack every season file of one mode ('player' or 'team')."""
+def load_logs(mode: str, paths=None) -> pd.DataFrame:
+    """Stack every season file of one mode ('player' or 'team').
+
+    paths: explicit files to read instead (e.g. a current-season snapshot);
+           the season is read from the name, e.g. 'player_2026-27_asof_...'.
+    """
     frames = []
-    for path in sorted(RAW_DIR.glob(f"{mode}_*.csv")):
+    for path in paths or sorted(RAW_DIR.glob(f"{mode}_*.csv")):
         # GAME_ID has leading zeros ('0020000004'): read it as text
         df = pd.read_csv(path, dtype={"GAME_ID": str})
         season = path.stem.split("_")[1]  # 'player_2000-01' -> '2000-01'
@@ -130,11 +134,14 @@ def add_team_and_opponent(games: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Da
     return out[out["OPP_TEAM_ID"] != out["TEAM_ID"]]
 
 
-def main(window: int = WINDOW) -> None:
-    draft = pd.read_csv(PROC_DIR / "draft_classes.csv")
-    player_logs = load_logs("player")
-    team_logs = load_logs("team")
+def build_window(draft: pd.DataFrame, player_logs: pd.DataFrame,
+                 team_logs: pd.DataFrame, window: int = WINDOW):
+    """Debuts and window games for a set of drafted players.
 
+    Returns (table, games): one row per drafted player, and one row per
+    player-game in the window. Used for the historical classes (main) and
+    for the current class (build_current_features.py).
+    """
     debuts = add_window_end(find_debuts(draft, player_logs), team_logs, window)
     games = add_team_and_opponent(cut_window_games(debuts, player_logs), team_logs)
 
@@ -166,6 +173,12 @@ def main(window: int = WINDOW) -> None:
         .merge(summary, on="player_id", how="left")
     )
     table["debuted"] = table["debut_date"].notna()
+    return table, games
+
+
+def main(window: int = WINDOW) -> None:
+    draft = pd.read_csv(PROC_DIR / "draft_classes.csv")
+    table, games = build_window(draft, load_logs("player"), load_logs("team"), window)
 
     suffix = window_suffix(window)
     table.to_csv(PROC_DIR / f"rookie_debuts{suffix}.csv", index=False)

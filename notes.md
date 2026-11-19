@@ -25,6 +25,10 @@
 - "Empty minutes" follow-up in `notebooks/07_empty_minutes.ipynb` (prompted by Darius Acuff Jr., 2026 class: ~36 mpg and 33% usage on a weak Kings team): tested two more features and built a warning flag for the player cards (`src/projection.py`)
 - **Final walk-forward test** on the 2017-2022 classes (331 players) in `notebooks/08_final_test.ipynb`. The model is now frozen
 
+### 2026-11-19
+- Step 8, current rookies: `src/fetch_current_season.py` (dated snapshots of the 2026-27 logs + nba_api player info for the 2026 class), `src/build_current_features.py --window N`, and `notebooks/09_current_rookies.ipynb` (first preview with 15-game features, data as of 2026-11-19: 46 of 60 rookies have debuted)
+- Refactors with unchanged outputs (verified): `build_rookie_window.build_window()` and `load_logs(paths=...)`, `build_features.team_rows_as_players(paths=...)` and `rate_features(priors=...)`
+
 ## Decisions
 
 ### 2026-11-17
@@ -101,6 +105,12 @@
   - `ts_add36`: points per 36 above a league-average shooter on the same shots (shrunk relative TS% × shot volume), so "empty volume" is strongly negative
   - **Rejected**: both stay in the data, not in the model
 - Warning flag on player cards instead of a model change: profile "heavy minutes, weak team" = ≥ 28 mpg (starter minutes) with window net rating ≤ -5 (about the weakest quarter), thresholds fixed before looking at the errors. The card reports the historical average error for the profile with a bootstrap 90% range and the number of players. The model supports the decision; the analyst adds the context the model can't learn
+- After the test (decisions made knowing the test results, so recorded as such):
+  - The final model for new players keeps the tested specification but is trained on every class with a known outcome (2000-2022), the standard step after evaluation; it also brings in the recent era the test showed was missing
+  - Cards for new players show only the "heavy minutes, weak team" warning (`projection.SHOWN_PROFILES`); the "other team" half didn't replicate on the test
+- Current-season data: the in-progress season is cached as dated snapshots (`*_asof_YYYY-MM-DD.csv`): same day = reuse, new day = new snapshot, old ones kept for reproducibility
+- Current rookies: shrinkage pulls toward the historical average rookie (priors from the historical classes with the same window), not toward this season's rookies; age = age on Feb 1 of the season from the nba_api birth date (same definition as BBRef); position from nba_api mapped to midpoints (Guard 1.5, Forward 3.5, Center 5, hybrids in between) for the style comparables
+- Until the rookies reach 25 team games, projections use the model trained on 15-game features (matching the evidence available); switch `WINDOW` to 25 in `09_current_rookies.ipynb` in mid-December
 - Final test setup: everything frozen beforehand (ensemble and settings, tiers, adaptive kernel, comparables, warning); one model per test class trained on the past only; reference sets for probabilities, comparables and the warning from the development set only. The warning check on the test classes was added after the first test run, but only evaluates the frozen warning (nothing was changed)
 - EDA uses the classes drafted 2000-2016 only, so no decision is informed by the test set (it was done before the walk-forward scheme; classes 2014-2016 only shaped general impressions such as the U-shaped relations)
 
@@ -179,3 +189,8 @@
 - The model is closer than the pick for 52% of test players (61% in CV). Biggest corrections: Haliburton (#12, pick 1.3 → model 5.0, real 9.4), Tatum, Trae Young, Mitchell (#13), Sengun (#16), Luka, Scottie Barnes; Fultz (#1) correctly pulled down (5.2 → 2.2, real 0.0). Biggest misses: Dennis Smith Jr. and RJ Barrett (empty minutes), Bam Adebayo and Robert Williams (quiet starts), Zion (injuries), Garland
 - Minutes warning on test: "heavy minutes, weak team" held (avg error −0.94 vs −0.72 in dev, 18 players: Barrett, Ivey, Markkanen...); "heavy minutes, other team" did not (−0.55 vs +1.12 in dev, 15 players), so the "too cautious" half doesn't replicate
 - Cards on test players: Luka 38% All-Star (became All-Star, 11.0), Tatum 38% (All-Star), Haliburton 34% (All-Star), Mitchell 30% (starter); Brunson 1% All-Star / 70% little value (became rotation, 3.1); Edwards (#1) only 11% (became starter, 5.8); LaMelo and Zion 36-38% All-Star (became rotation/bench)
+
+### 2026-11-19
+- First preview of the 2026 class (15-game features, as of 2026-11-19): top projections Cameron Boozer (#3, 6.1 VORP, 40% All-Star level; looks like Luka, LeBron, Melo), Yaxel Lendeborg (#11, 4.9 vs 1.4 expected from the pick, 38%), Darius Acuff Jr. (#7, 4.7, 38%, with the weak-team warning), Darryn Peterson (#2, 4.2, 30%), AJ Dybantsa (#1, 4.0 vs 4.6 from the pick, 24%, warning; looks like Wiggins and RJ Barrett)
+- Biggest early overperformers vs their slot: Lendeborg (#11), Meleek Thomas (#34, 2.6 vs 0.6), Baba Miller (#36); underperformers vs slot: Aday Mara (#12), Nate Ament (#15)
+- With the full training set (2000-2022) the weak-team warning reads: too optimistic by 0.5 VORP on average (90% range -1.4 to +0.3, 47 players); it applies to Acuff, Dybantsa, Peterson and Caleb Wilson

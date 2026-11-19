@@ -109,6 +109,9 @@ def brier_score(probs: pd.DataFrame, actual) -> float:
 HEAVY_MPG = 28
 WEAK_TEAM_NET = -5
 PROFILES = ["Heavy minutes, weak team", "Heavy minutes, other team"]
+# Only this one replicated on the 2017-2022 test classes (notebooks/08); the
+# "other team" half flipped sign, so cards for new players don't show it
+SHOWN_PROFILES = ["Heavy minutes, weak team"]
 
 
 def minutes_profile(df: pd.DataFrame) -> pd.Series:
@@ -136,9 +139,13 @@ def profile_history(ref: pd.DataFrame, ref_preds: pd.Series, target: str = "targ
     return pd.DataFrame(rows).T
 
 
-def profile_warning(profile: str, history: pd.DataFrame) -> str:
-    """One line of context for a player card ('' when no profile applies)."""
-    if not profile:
+def profile_warning(profile: str, history: pd.DataFrame, shown=None) -> str:
+    """One line of context for a player card ('' when no profile applies).
+
+    shown: profiles allowed on the card (default: all, as used in 07 and 08;
+           pass SHOWN_PROFILES for new players).
+    """
+    if not profile or (shown is not None and profile not in shown):
         return ""
     h = history.loc[profile]
     direction = "too optimistic" if h["avg_error"] < 0 else "too cautious"
