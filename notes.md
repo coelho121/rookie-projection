@@ -30,6 +30,8 @@
 - Refactors with unchanged outputs (verified): `build_rookie_window.build_window()` and `load_logs(paths=...)`, `build_features.team_rows_as_players(paths=...)` and `rate_features(priors=...)`
 - Wrapped up the project: wrote the final README from these notes and exported its key charts to `figures/`. The 40-game window, betting win totals and the 25-game re-run of the 2026 class are left as next steps
 - Added `src/build_cards.py`: a saved card for every rookie, `reports/cards_history.md` (1,180 players, 2000-2022) and `reports/cards_2026_class.md` (46 players as of 2026-11-19), plus CSVs in `data/processed/`. Added the superstar finding to the README
+- Published a Portuguese presentation page with the cards (2026 class + past hits and misses), to validate the projections with people who know basketball: https://claude.ai/artifact/1veqALnbKWXuNh2cR4cNFL (private until shared from the page's Share menu)
+- Same cards as a Canva-importable deck: `reports/rookies_2026_cards.pptx` (18 slides, 16:9, Arial, editable shapes and text): intro, how to read a card, past hits and misses, 30 cards of 2026 rookies with 8+ games (3 per slide), a table for the 16 with fewer games, questions and limitations. Built with python-pptx in a separate scratch environment and checked slide by slide via PowerPoint's own export
 
 ## Decisions
 
