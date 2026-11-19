@@ -23,6 +23,7 @@
 - Step 6: tiers, tier probabilities, style comparables and player cards in `notebooks/05_projections.ipynb`; logic in `src/projection.py`
 - Step 7A, robustness in `notebooks/06_robustness.ipynb`: model without the age cut, and 10/15-game windows. `build_rookie_window.py` and `build_features.py` now take `--window N` (writes `*_wN.csv`); `build_features.py` also writes `model_table_all_ages.csv`
 - "Empty minutes" follow-up in `notebooks/07_empty_minutes.ipynb` (prompted by Darius Acuff Jr., 2026 class: ~36 mpg and 33% usage on a weak Kings team): tested two more features and built a warning flag for the player cards (`src/projection.py`)
+- **Final walk-forward test** on the 2017-2022 classes (331 players) in `notebooks/08_final_test.ipynb`. The model is now frozen
 
 ## Decisions
 
@@ -100,6 +101,7 @@
   - `ts_add36`: points per 36 above a league-average shooter on the same shots (shrunk relative TS% × shot volume), so "empty volume" is strongly negative
   - **Rejected**: both stay in the data, not in the model
 - Warning flag on player cards instead of a model change: profile "heavy minutes, weak team" = ≥ 28 mpg (starter minutes) with window net rating ≤ -5 (about the weakest quarter), thresholds fixed before looking at the errors. The card reports the historical average error for the profile with a bootstrap 90% range and the number of players. The model supports the decision; the analyst adds the context the model can't learn
+- Final test setup: everything frozen beforehand (ensemble and settings, tiers, adaptive kernel, comparables, warning); one model per test class trained on the past only; reference sets for probabilities, comparables and the warning from the development set only. The warning check on the test classes was added after the first test run, but only evaluates the frozen warning (nothing was changed)
 - EDA uses the classes drafted 2000-2016 only, so no decision is informed by the test set (it was done before the walk-forward scheme; classes 2014-2016 only shaped general impressions such as the U-shaped relations)
 
 ## Problems
@@ -115,6 +117,7 @@
 - In 2001 and 2002, NBA pick numbers from pick 29 on are one lower than BBRef's (the NBA renumbered after Minnesota's forfeited pick), so pick number alone can't link the sources
 - BBRef values use BPM 2.0 (revised in 2020); older published numbers (e.g. Westbrook 2016-17 VORP 12.4) no longer match
 - "Empty minutes" (heavy early minutes on weak teams: Carter-Williams, Tyreke Evans, O.J. Mayo, Jonny Flynn) remain a known limitation; team-context features didn't fix them
+- Era drift in the target: recent classes reach lower VORP for the same early profile. Mean target 1.07 (classes 2000-06), 1.14 (2007-13), 0.94 (2014-16), 0.86 (2017-22), while window mpg is unchanged (~13); year-3 minutes fell from ~1050-1090 to ~900 (minutes spread across more players). A model trained on older classes over-predicts newer ones (test avg error -0.30 for unflagged players, calibration below the diagonal)
 
 ## Findings
 
@@ -168,3 +171,11 @@
 - Neither empty-volume feature helps: `young_minutes_share` and `ts_add36` each beat the current model in only 9/25 splits (both together 11/25) and nudge RMSE up (+0.001 to +0.003)
 - The empty-minutes pattern is real but small and noisy: for heavy-minutes rookies on weak teams the model was too optimistic by 0.7 VORP on average (90% range -1.7 to +0.3, 27 players); for heavy-minutes rookies on other teams it was too cautious by 1.1 (range about 0 to +2.3, 32 players). Early minutes are worth more on a decent team than on a bad one, but ~60 cases are too few for the model to learn it
 - The flagged group mixes busts (Carter-Williams, Jonny Flynn, Jay Williams, Dajuan Wagner) and stars (Durant, Anthony Davis, Westbrook, Blake Griffin): heavy minutes on a bad team are a yellow light, not a verdict
+- **Final test (2017-2022, walk-forward, 331 players): the model still beats the pick.** RMSE 1.654 → 1.519 (−8.2%; CV was −10%), MAE 1.163 → 1.126, Spearman 0.26 → 0.33 (CV 0.27 → 0.44). Paired bootstrap: gain +0.13, 90% range −0.01 to +0.27, model better in 94% of resamples, so strong but not airtight evidence
+- By class: model has lower RMSE in 4 of 6 (2017, 2018, 2020, 2021; worse in 2019 and 2022) and higher Spearman in 4 of 6 (worse in 2019 and 2021)
+- By segment: picks 1-10 RMSE 2.57 → 2.44 (Spearman 0.34 → 0.40); picks 11-30 RMSE 1.84 → 1.52 with Spearman 0.05 → 0.35 (the biggest gain: ranking players picked in similar spots); 2nd round RMSE worse 0.86 → 0.94 (Spearman 0.08 → 0.20)
+- Tier probabilities hold on test: Brier 0.510 (model) < 0.532 (pick only) < 0.559 (no information)
+- Quantile coverage on test: 10.6% above the ceiling (target 10%), but 18% below the floor and 59% below the median: the central case and floor are too optimistic for recent classes (era drift)
+- The model is closer than the pick for 52% of test players (61% in CV). Biggest corrections: Haliburton (#12, pick 1.3 → model 5.0, real 9.4), Tatum, Trae Young, Mitchell (#13), Sengun (#16), Luka, Scottie Barnes; Fultz (#1) correctly pulled down (5.2 → 2.2, real 0.0). Biggest misses: Dennis Smith Jr. and RJ Barrett (empty minutes), Bam Adebayo and Robert Williams (quiet starts), Zion (injuries), Garland
+- Minutes warning on test: "heavy minutes, weak team" held (avg error −0.94 vs −0.72 in dev, 18 players: Barrett, Ivey, Markkanen...); "heavy minutes, other team" did not (−0.55 vs +1.12 in dev, 15 players), so the "too cautious" half doesn't replicate
+- Cards on test players: Luka 38% All-Star (became All-Star, 11.0), Tatum 38% (All-Star), Haliburton 34% (All-Star), Mitchell 30% (starter); Brunson 1% All-Star / 70% little value (became rotation, 3.1); Edwards (#1) only 11% (became starter, 5.8); LaMelo and Zion 36-38% All-Star (became rotation/bench)
