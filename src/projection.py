@@ -171,7 +171,7 @@ def style_comps(players: pd.DataFrame, ref: pd.DataFrame, k: int = 5,
         dist[ref["player_id"].to_numpy() == row["player_id"]] = np.inf
         for rank, j in enumerate(np.argsort(dist)[:k], start=1):
             comp = ref.iloc[j]
-            rows.append({"player": row["player_name"], "rank": rank,
+            rows.append({"player_id": row["player_id"], "player": row["player_name"], "rank": rank,
                          "comp": comp["player_name"], "comp_pick": int(comp["pick"]),
                          "comp_draft_year": int(comp["draft_year"]),
                          "comp_target": comp.get("target_vorp", np.nan),
