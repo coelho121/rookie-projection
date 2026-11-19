@@ -43,6 +43,9 @@ PROC_DIR = ROOT / "data" / "processed"
 REPORTS = ROOT / "reports"
 QUANTILES = [0.1, 0.5, 0.9]
 KERNEL = dict(bandwidth=0.5, min_neighbors=50)
+# Neighbours must also be close in draft position (log(pick) units), chosen on the
+# development set after the final test (notebooks/10_tier_refinement.ipynb)
+PICK_BANDWIDTH = 0.5
 
 
 # ------------------------------------------------------------------ predictions
@@ -126,9 +129,13 @@ def history_cards() -> pd.DataFrame:
 
     ref = cards.loc[in_dev, "model_pred"]
     ref_actual = cards.loc[in_dev, m.TARGET]
+    ref_picks = cards.loc[in_dev, "pick"]
     probs = pd.concat([
-        pj.tier_probabilities(ref, ref, ref_actual, exclude_self=True, **KERNEL),
-        pj.tier_probabilities(cards.loc[~in_dev, "model_pred"], ref, ref_actual, **KERNEL),
+        pj.tier_probabilities(ref, ref, ref_actual, exclude_self=True, **KERNEL,
+                              picks=ref_picks, ref_picks=ref_picks, pick_bandwidth=PICK_BANDWIDTH),
+        pj.tier_probabilities(cards.loc[~in_dev, "model_pred"], ref, ref_actual, **KERNEL,
+                              picks=cards.loc[~in_dev, "pick"], ref_picks=ref_picks,
+                              pick_bandwidth=PICK_BANDWIDTH),
     ])
     cards = cards.join(probs)
     cards["tier"] = pj.tier_of(cards[m.TARGET])
@@ -157,7 +164,9 @@ def current_cards(window: int) -> pd.DataFrame:
     cur = cur.join(quant)
 
     _, train_oof = m.repeated_cv(md.ensemble, md.ALL, train)
-    cur = cur.join(pj.tier_probabilities(cur["model_pred"], train_oof, train[m.TARGET], **KERNEL))
+    cur = cur.join(pj.tier_probabilities(cur["model_pred"], train_oof, train[m.TARGET], **KERNEL,
+                                         picks=cur["pick"], ref_picks=train["pick"],
+                                         pick_bandwidth=PICK_BANDWIDTH))
     history = pj.profile_history(train, train_oof)
     cur["warning"] = [pj.profile_warning(p, history, shown=pj.SHOWN_PROFILES)
                       for p in pj.minutes_profile(cur)]

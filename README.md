@@ -124,7 +124,11 @@ A single predicted VORP is an average of many futures, so it is always cautious.
 Instead, each player gets **tier probabilities**: among historical players with a
 similar projection, how many became bench players, starters, All-Star-level players.
 These hold up on the test (Brier score 0.51 vs 0.53 for pick only), along with a
-floor-to-ceiling range and "plays like" comparables.
+floor-to-ceiling range and "plays like" comparables. After the test, the probabilities
+on the cards were refined to compare players with similar projections *and* similar
+draft slots (chosen on the development set; small gain, Brier 0.510 → 0.508 on the
+test), and the bottom tier is called "replacement level": most of those players are
+not out of the league, they just don't add more than a replacement would.
 
 ![Test player cards](figures/test_player_cards.png)
 
@@ -199,7 +203,7 @@ src/          data pipeline and shared modelling code
   build_cards.py (player cards for every rookie)
 notebooks/    01 EDA · 02 modelling · 03 interpretation · 04 team features (rejected)
               05 projections · 06 robustness · 07 empty minutes · 08 final test
-              09 current rookies
+              09 current rookies · 10 tier refinement
 figures/      charts used in this README
 reports/      player cards: every rookie 2000-2022, and the current class
 notes.md      full log of decisions, problems and findings

@@ -21,7 +21,10 @@ import numpy as np
 import pandas as pd
 
 TIERS = [
-    ("Little or no value", -np.inf, 0.5),
+    # "Replacement level": out of the league, or playing without adding more than a
+    # replacement player would (e.g. Dillon Brooks, Evan Turner in years 3-4).
+    # Named "Little or no value" before 2026-11-19; renamed because it read as "bust".
+    ("Replacement level", -np.inf, 0.5),
     ("Bench", 0.5, 2.0),
     ("Rotation", 2.0, 4.0),
     ("Starter", 4.0, 6.0),
@@ -44,7 +47,9 @@ def tier_of(values) -> pd.Series:
 def tier_probabilities(preds, ref_preds: pd.Series, ref_actual: pd.Series,
                        k: int | None = None, bandwidth: float | None = None,
                        min_neighbors: int = 0,
-                       exclude_self: bool = False) -> pd.DataFrame:
+                       exclude_self: bool = False,
+                       picks=None, ref_picks=None,
+                       pick_bandwidth: float | None = None) -> pd.DataFrame:
     """Tier shares among the reference players with similar predictions.
 
     Two ways to define "similar" (pass exactly one):
@@ -63,10 +68,19 @@ def tier_probabilities(preds, ref_preds: pd.Series, ref_actual: pd.Series,
     ref_actual:   their real target values
     exclude_self: True when `preds` are the reference players themselves
                   (leave-one-out, so nobody is his own neighbour)
+    picks, ref_picks, pick_bandwidth (kernel only, optional): also require
+                  similar draft position, measured in log(pick). Without it a
+                  mid-first-rounder projected at ~1 VORP is compared with many
+                  second-rounders with the same projection, who fail more often
+                  (notebooks/10_tier_refinement.ipynb).
 
     Returns one column per tier plus `n_eff`, the effective number of
     players the percentages are based on.
     """
+    use_pick = pick_bandwidth is not None
+    if use_pick:
+        log_ref_pick = np.log(np.asarray(ref_picks, dtype=float))
+        log_pick = pd.Series(np.log(np.asarray(picks, dtype=float)), index=preds.index)
     if (k is None) == (bandwidth is None):
         raise ValueError("pass exactly one of k or bandwidth")
     onehot = (pd.get_dummies(tier_of(ref_actual))
@@ -81,9 +95,13 @@ def tier_probabilities(preds, ref_preds: pd.Series, ref_actual: pd.Series,
             weights = np.zeros(len(ref))
             weights[np.argsort(dist, kind="stable")[:k]] = 1.0
         else:
+            # distance in units of the bandwidths (prediction, and pick if used)
+            dist = dist / bandwidth
+            if use_pick:
+                dist = np.sqrt(dist ** 2 + ((log_ref_pick - log_pick[idx]) / pick_bandwidth) ** 2)
             if exclude_self:
                 dist[ref_preds.index.get_loc(idx)] = np.inf
-            weights = np.exp(-0.5 * (dist / bandwidth) ** 2)
+            weights = np.exp(-0.5 * dist ** 2)
             if min_neighbors:
                 # the closest min_neighbors players always count in full. Widening
                 # the bell curve instead would, for the most extreme prediction,
